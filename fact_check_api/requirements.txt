@@ -1,0 +1,20 @@
+# Multi-Source Search API Dependencies
+
+# Web Framework
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# Data Validation
+pydantic>=2.10.0
+
+# HTTP Client & Parsing
+aiohttp>=3.11.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+
+# Utilities
+python-dotenv>=1.0.0
+python-dateutil>=2.8.0
+
+# Note: crawl4ai is used from parent project (../crawl4ai)
+# The start_api.py script automatically adds it to Python path
