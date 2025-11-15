@@ -8,6 +8,9 @@ from .simple_schemas import (
     SearchResult,
     SearchStats,
     SearchProgress,
+    ModelProcessingOptions,
+    ModelChunk,
+    ModelStatus,
 )
 
 __all__ = [
@@ -16,4 +19,7 @@ __all__ = [
     "SearchResult",
     "SearchStats",
     "SearchProgress",
+    "ModelProcessingOptions",
+    "ModelChunk",
+    "ModelStatus",
 ]

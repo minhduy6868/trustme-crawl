@@ -10,6 +10,50 @@ from pydantic import BaseModel, Field, HttpUrl
 
 # ==================== INPUT MODELS ====================
 
+class ModelProcessingOptions(BaseModel):
+    """Tùy chọn xử lý cho downstream model (LLM, reranker, etc.)"""
+    enabled: bool = Field(
+        default=False,
+        description="Bật chuẩn bị dữ liệu cho model xử lý sau khi crawl"
+    )
+    chunk_size: int = Field(
+        default=1200,
+        description="Kích thước chunk (ký tự) gửi vào model",
+        ge=200,
+        le=4000,
+    )
+    chunk_overlap: int = Field(
+        default=150,
+        description="Phần trùng lặp giữa các chunk (ký tự)",
+        ge=0,
+        le=1000,
+    )
+    max_chunks: int = Field(
+        default=200,
+        description="Giới hạn số chunk tối đa gửi vào model",
+        ge=1,
+        le=2000,
+    )
+    max_parallel_workers: int = Field(
+        default=4,
+        description="Số worker tối đa xử lý song song phía model",
+        ge=1,
+        le=32,
+    )
+    summarize: bool = Field(
+        default=True,
+        description="Model sẽ sinh summary/tóm tắt"
+    )
+    rerank: bool = Field(
+        default=False,
+        description="Model rerank kết quả trước khi trả về"
+    )
+    stream_output: bool = Field(
+        default=True,
+        description="Cho phép stream kết quả model từng phần ra frontend"
+    )
+
+
 class SearchRequest(BaseModel):
     """Request model for multi-source search"""
     query: str = Field(
@@ -49,6 +93,11 @@ class SearchRequest(BaseModel):
         le=600
     )
     
+    model_options: ModelProcessingOptions = Field(
+        default_factory=ModelProcessingOptions,
+        description="Cấu hình chuẩn bị dữ liệu để đưa vào downstream model"
+    )
+    
     class Config:
         json_schema_extra = {
             "example": {
@@ -56,7 +105,14 @@ class SearchRequest(BaseModel):
                 "max_results": 100,
                 "include_sources": ["google", "facebook", "twitter", "news"],
                 "languages": ["vi"],
-                "deep_crawl": True
+                "deep_crawl": True,
+                "model_options": {
+                    "enabled": True,
+                    "chunk_size": 1500,
+                    "chunk_overlap": 200,
+                    "summarize": True,
+                    "rerank": True
+                }
             }
         }
 
@@ -160,7 +216,17 @@ class SearchResponse(BaseModel):
         default_factory=list,
         description="Danh sách kết quả tìm kiếm"
     )
-    
+
+    # Model-ready payload
+    model_chunks: List[ModelChunk] = Field(
+        default_factory=list,
+        description="Danh sách chunk nội dung đã chuẩn hóa để đưa vào model"
+    )
+    model_status: ModelStatus = Field(
+        default_factory=ModelStatus,
+        description="Trạng thái xử lý của downstream model"
+    )
+
     # Stats
     stats: SearchStats
     
@@ -195,6 +261,13 @@ class SearchResponse(BaseModel):
                     "total_crawled": 145,
                     "trusted_sources": 50,
                     "untrusted_sources": 95
+                },
+                "model_status": {
+                    "enabled": True,
+                    "state": "queued",
+                    "total_chunks": 12,
+                    "pending_chunks": 12,
+                    "processed_chunks": 0
                 },
                 "status": "completed"
             }

@@ -6,7 +6,7 @@ API tìm kiếm và tổng hợp thông tin từ nhiều nguồn trên Internet
 import asyncio
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 import os
 import time
 
@@ -20,6 +20,9 @@ from models.simple_schemas import (
     SearchResult,
     SearchStats,
     SearchProgress,
+    ModelChunk,
+    ModelStatus,
+    ModelProcessingOptions,
 )
 from services.enhanced_search import EnhancedSearchService
 from services.simple_crawler import SimpleContentCrawler
@@ -179,6 +182,12 @@ async def search(request: SearchRequest):
             
             final_results.append(search_result)
         
+        model_chunks, model_status = _prepare_model_payload(
+            request_id=request_id,
+            results=final_results,
+            options=request.model_options,
+        )
+        
         # Calculate processing time
         processing_time = time.time() - start_time
         
@@ -187,6 +196,8 @@ async def search(request: SearchRequest):
             request_id=request_id,
             query=request.query,
             results=final_results,
+            model_chunks=model_chunks,
+            model_status=model_status,
             stats=SearchStats(
                 total_found=len(search_results),
                 total_crawled=len([r for r in crawled_results if r.get('crawl_success')]),
@@ -215,12 +226,22 @@ async def search_async(request: SearchRequest, background_tasks: BackgroundTasks
     """
     request_id = f"search_{uuid.uuid4().hex[:12]}"
     
+    initial_model_status = ModelStatus(
+        enabled=request.model_options.enabled,
+        state="pending" if request.model_options.enabled else "disabled",
+        total_chunks=0,
+        pending_chunks=0,
+        processed_chunks=0,
+        concurrency_limit=request.model_options.max_parallel_workers,
+    ).model_dump()
+    
     # Store initial status
     search_results_storage[request_id] = {
         "request_id": request_id,
         "query": request.query,
         "status": "processing",
         "created_at": datetime.utcnow().isoformat(),
+        "model_status": initial_model_status,
     }
     
     # Start background task
@@ -235,6 +256,7 @@ async def search_async(request: SearchRequest, background_tasks: BackgroundTasks
         "status": "processing",
         "message": "Search started. Sử dụng GET /search/result/{request_id} để lấy kết quả.",
         "estimated_time_seconds": request.max_results * 1.5,
+        "model_status": initial_model_status,
     }
 
 
@@ -321,6 +343,12 @@ async def _process_search_background(request_id: str, request: SearchRequest):
             
             final_results.append(search_result)
         
+        model_chunks, model_status = _prepare_model_payload(
+            request_id=request_id,
+            results=final_results,
+            options=request.model_options,
+        )
+        
         processing_time = time.time() - start_time
         
         # Store result
@@ -328,6 +356,8 @@ async def _process_search_background(request_id: str, request: SearchRequest):
             request_id=request_id,
             query=request.query,
             results=final_results,
+            model_chunks=model_chunks,
+            model_status=model_status,
             stats=SearchStats(
                 total_found=len(search_results),
                 total_crawled=len([r for r in crawled_results if r.get('crawl_success')]),
@@ -351,6 +381,15 @@ async def _process_search_background(request_id: str, request: SearchRequest):
             "error_message": str(e),
             "created_at": search_results_storage[request_id]["created_at"],
             "completed_at": datetime.utcnow().isoformat(),
+            "model_status": ModelStatus(
+                enabled=request.model_options.enabled,
+                state="failed" if request.model_options.enabled else "disabled",
+                total_chunks=0,
+                pending_chunks=0,
+                processed_chunks=0,
+                concurrency_limit=request.model_options.max_parallel_workers,
+                last_error=str(e),
+            ).model_dump(),
         }
 
 
@@ -411,6 +450,98 @@ def _calculate_trust_score(domain: str, source: str) -> float:
             return 35.0
         else:
             return 50.0
+
+
+def _prepare_model_payload(
+    request_id: str,
+    results: List[SearchResult],
+    options: ModelProcessingOptions,
+) -> tuple[list[ModelChunk], ModelStatus]:
+    """Chuyển đổi kết quả crawl thành payload cho downstream model"""
+    
+    if not options or not options.enabled:
+        return [], ModelStatus(enabled=False, state="disabled")
+    
+    chunk_overlap = min(max(options.chunk_overlap, 0), options.chunk_size - 1)
+    chunks: list[ModelChunk] = []
+    
+    for result in results:
+        text_payload = (result.content or result.snippet or "")
+        if not text_payload:
+            continue
+        
+        chunk_texts = _chunk_text(text_payload, options.chunk_size, chunk_overlap)
+        if not chunk_texts:
+            continue
+        
+        for chunk_text in chunk_texts:
+            chunk = ModelChunk(
+                chunk_id=f"{request_id}_{len(chunks) + 1}",
+                order=len(chunks) + 1,
+                request_id=request_id,
+                source=result.source,
+                domain=result.domain,
+                trust_score=result.trust_score,
+                text=chunk_text,
+                metadata={
+                    "title": result.title,
+                    "url": result.url,
+                    "author": result.author,
+                    "published_time": result.published_time.isoformat() if result.published_time else None,
+                    "language": result.language,
+                    "word_count": result.word_count,
+                    "url_trust": result.url_trust,
+                    "source": result.source,
+                    "domain": result.domain,
+                },
+            )
+            chunks.append(chunk)
+            
+            if len(chunks) >= options.max_chunks:
+                break
+        
+        if len(chunks) >= options.max_chunks:
+            break
+    
+    state = "queued" if chunks else "pending"
+    model_status = ModelStatus(
+        enabled=True,
+        state=state,
+        total_chunks=len(chunks),
+        pending_chunks=len(chunks),
+        processed_chunks=0,
+        concurrency_limit=options.max_parallel_workers,
+    )
+    
+    return chunks, model_status
+
+
+def _chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
+    """Cắt text thành các chunk nhỏ để đưa vào model"""
+    if not text:
+        return []
+    
+    normalized = " ".join(text.split())
+    if not normalized:
+        return []
+    
+    chunk_overlap = max(0, min(chunk_overlap, chunk_size - 1))
+    step = chunk_size - chunk_overlap
+    if step <= 0:
+        step = chunk_size
+    
+    chunks: list[str] = []
+    start = 0
+    text_length = len(normalized)
+    
+    while start < text_length:
+        end = min(start + chunk_size, text_length)
+        chunks.append(normalized[start:end])
+        if end >= text_length:
+            break
+        start += step
+    
+    return chunks
 
 
 # ==================== Run Server ====================
