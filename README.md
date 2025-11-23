@@ -1,99 +1,214 @@
-# TrustMe Crawler API
+# TrustMe Crawl - Fact Check API
 
-Multi-source web crawler for fact-checking system.
+**Multi-source web crawler and article analyzer for fact-checking system.**
 
-## Purpose
+## 🎯 Project Structure
 
-Crawls and aggregates content from multiple sources:
-- Google Search
-- Facebook, Twitter, Reddit
-- News sites
-- YouTube, TikTok
-- Government sites (.gov)
+```
+trustme-crawl/
+├── README.md                 # This documentation
+├── crawl4ai/                 # Core crawler engine
+├── fact_check_api/           # Article Analyze API
+│   ├── api_server.py         # FastAPI application
+│   ├── start_server.bat      # Windows startup script
+│   ├── requirements.txt      # API dependencies
+│   ├── .gitignore            # Git ignore patterns
+│   ├── models/               # Pydantic schemas
+│   │   ├── __init__.py
+│   │   └── fact_check_schemas.py
+│   └── services/             # Business logic
+│       ├── __init__.py
+│       ├── fact_check_service.py
+│       ├── enhanced_search.py
+│       └── simple_crawler.py
+├── LICENSE
+├── pyproject.toml
+├── setup.py
+└── requirements.txt          # Main project dependencies
+```
 
-## Features
+## 🚀 Quick Start
 
-- Async crawling with Crawl4AI
-- Multi-source search via DuckDuckGo
-- Content extraction and cleaning
-- Basic trust scoring
-- Concurrent request handling
+### 1. Install Dependencies
 
-## Installation
+```bash
+pip install -r fact_check_api/requirements.txt
+```
 
+### 2. Run API Server
+
+**Windows:**
 ```bash
 cd fact_check_api
-pip install -r requirements.txt
+start_server.bat
 ```
 
-## Run
+**Linux/Mac:**
+```bash
+cd fact_check_api
+python api_server.py
+```
+
+Server runs on: **http://localhost:8001**
+
+### 3. Test API
 
 ```bash
-python start_api.py
+curl -X POST http://localhost:8001/api/article/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com/article",
+    "article": "Your article content here...",
+    "platform": "web"
+  }'
 ```
 
-API runs on **http://localhost:8000**
+## 📚 API Documentation
 
-## API Endpoints
+### Endpoint: **POST /api/article/analyze**
 
-### POST /search
+Analyze an article and find related content from multiple sources.
 
-Search and crawl content from multiple sources.
-
-**Request:**
+**Request Body:**
 ```json
 {
-  "query": "search keywords",
-  "max_results": 30,
-  "include_sources": ["google", "news", "government"],
-  "languages": ["vi", "en"],
-  "deep_crawl": true
+  "url": "https://example.com/article",
+  "title": "Article Title (optional)",
+  "article": "Full article content",
+  "created_at": "2024-11-23T10:00:00.000Z (optional)",
+  "author": "Author name (optional)",
+  "platform": "web",
+  "image_urls": []
 }
 ```
 
 **Response:**
 ```json
 {
-  "request_id": "search_abc123",
-  "query": "search keywords",
-  "results": [
+  "main_search": {
+    "url": "https://example.com/article",
+    "title": "Article Title",
+    "article": "Full article content",
+    "platform": "web",
+    "created_at": "2024-11-23T10:00:00.000Z",
+    "author": "Author name",
+    "image_urls": []
+  },
+  "data": [
     {
-      "title": "Article title",
-      "content": "Full content...",
-      "url": "https://...",
-      "domain": "example.com",
-      "trust_score": 85.0,
-      "url_trust": true,
-      "crawl_success": true
+      "url": "https://related-article-1.com",
+      "title": "Related Article Title",
+      "article": "Clean text content (HTML removed)",
+      "domain": "related-article-1.com",
+      "created_at": null,
+      "author": null,
+      "platform": "web",
+      "crawl_success": true,
+      "image_urls": []
     }
   ],
-  "stats": {
-    "total_found": 30,
-    "total_crawled": 28,
-    "trusted_sources": 20
+  "meta": {
+    "page": 1,
+    "limit": 10,
+    "total": 45,
+    "has_next": false
   }
 }
 ```
 
-## Configuration
+### Platform Values
 
-Default settings work out of the box. Optional customization:
+- `web` - Website/Blog
+- `facebook` - Facebook post
+- `twitter` - Twitter/X post
+- `youtube` - YouTube video
+- `tiktok` - TikTok video
+- `reddit` - Reddit post
 
+## 🛠️ Technology Stack
+
+- **FastAPI** - Modern async web framework
+- **Crawl4AI** - Web crawler engine
+- **BeautifulSoup4** - HTML parsing
+- **aiohttp** - Async HTTP client
+- **Pydantic v2** - Data validation
+
+## 💡 API Examples
+
+### 1. Health Check
 ```bash
-export API_PORT=8000
-export MAX_CONCURRENT_CRAWLS=10
+curl http://localhost:8001/health
 ```
 
-## Usage
+### 2. Analyze Vietnamese Article
+```bash
+curl -X POST http://localhost:8001/api/article/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://vnexpress.net/vaccine-covid-19",
+    "title": "Vaccine COVID-19 thế hệ mới",
+    "article": "Bộ Y tế Việt Nam vừa công bố phê duyệt vaccine COVID-19 thế hệ mới...",
+    "platform": "web",
+    "author": "VnExpress"
+  }'
+```
 
-This API is designed to be called by the **TrustMe Model API**, not directly by end users.
+### 3. Analyze English Tech News
+```bash
+curl -X POST http://localhost:8001/api/article/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://techcrunch.com/ai-news",
+    "title": "OpenAI Releases GPT-5",
+    "article": "OpenAI announced today the release of GPT-5...",
+    "platform": "web"
+  }'
+```
 
-Model API → Crawler API → Returns data
+### 4. Analyze Facebook Post
+```bash
+curl -X POST http://localhost:8001/api/article/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://facebook.com/user/posts/123",
+    "article": "Breaking news about new technology...",
+    "platform": "facebook",
+    "created_at": "2024-11-23T10:00:00.000Z"
+  }'
+```
 
-## Documentation
+### 5. Minimal Request
+```bash
+curl -X POST http://localhost:8001/api/article/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com/article",
+    "article": "Article content here",
+    "platform": "web"
+  }'
+```
 
-API docs: http://localhost:8000/docs
+**📚 More Documentation:**
+- **Swagger UI**: http://localhost:8001/docs (interactive API docs)
+- **ReDoc**: http://localhost:8001/redoc (alternative docs)
 
-## License
+## 🔧 Configuration
 
-Apache 2.0
+Default settings:
+- **Port**: 8001
+- **Search sources**: Google + News
+- **Max results**: 100 per query
+- **Deep crawl**: Always enabled
+- **Languages**: Auto-detect (Vietnamese + English)
+
+## 🤝 Contributing
+
+This is a private project for TrustMe fact-checking system.
+
+## 📄 License
+
+See LICENSE file for details.
+
+---
+
+**Built with ❤️ for TrustMe Fact-Checking System**

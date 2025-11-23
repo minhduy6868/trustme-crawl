@@ -204,6 +204,32 @@ class SearchStats(BaseModel):
     processing_time_seconds: float = Field(default=0.0, description="Thời gian xử lý (giây)")
 
 
+class ModelChunk(BaseModel):
+    """Chunk nội dung chuẩn bị cho downstream model"""
+    chunk_id: str = Field(..., description="ID chunk")
+    order: int = Field(..., description="Thứ tự chunk")
+    request_id: str = Field(..., description="ID request gốc")
+    source: str = Field(..., description="Nguồn crawl")
+    domain: str = Field(..., description="Domain")
+    trust_score: float = Field(..., description="Điểm tin cậy")
+    text: str = Field(..., description="Nội dung chunk")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Metadata bổ sung")
+
+
+class ModelStatus(BaseModel):
+    """Trạng thái xử lý của downstream model"""
+    enabled: bool = Field(default=False, description="Model có được bật không")
+    state: str = Field(
+        default="disabled",
+        description="Trạng thái: disabled, pending, queued, processing, completed, failed"
+    )
+    total_chunks: int = Field(default=0, description="Tổng số chunk")
+    pending_chunks: int = Field(default=0, description="Chunk chờ xử lý")
+    processed_chunks: int = Field(default=0, description="Chunk đã xử lý")
+    concurrency_limit: int = Field(default=4, description="Giới hạn song song")
+    last_error: Optional[str] = Field(None, description="Lỗi gần nhất (nếu có)")
+
+
 class SearchResponse(BaseModel):
     """Response trả về từ API search"""
     

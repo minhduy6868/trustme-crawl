@@ -1,25 +1,19 @@
 """
-Simple Search API Models
+Fact Check API Models
 """
 
-from .simple_schemas import (
-    SearchRequest,
-    SearchResponse,
-    SearchResult,
-    SearchStats,
-    SearchProgress,
-    ModelProcessingOptions,
-    ModelChunk,
-    ModelStatus,
+from .fact_check_schemas import (
+    SourceArticle,
+    ArticleAnalyzeRequest,
+    RelatedArticle,
+    PaginationMeta,
+    ArticleAnalyzeResponse,
 )
 
 __all__ = [
-    "SearchRequest",
-    "SearchResponse",
-    "SearchResult",
-    "SearchStats",
-    "SearchProgress",
-    "ModelProcessingOptions",
-    "ModelChunk",
-    "ModelStatus",
+    "SourceArticle",
+    "ArticleAnalyzeRequest",
+    "RelatedArticle",
+    "PaginationMeta",
+    "ArticleAnalyzeResponse",
 ]
