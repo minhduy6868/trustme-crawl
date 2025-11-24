@@ -120,14 +120,17 @@ async def analyze_article(request: ArticleAnalyzeRequest):
         
         print(f"✅ Generated {len(queries)} queries")
         
-        # Step 2: Search (default: google + news, max 100 results)
-        print(f"🌐 Searching across sources...")
+        # Step 2: Search ALL sources by default (150 results for better social coverage)
+        include_sources = ["google", "facebook", "twitter", "instagram", "linkedin", "reddit", "youtube", "tiktok", "news"]
+        max_results = 150
+        
+        print(f"🌐 Searching across ALL sources: {', '.join(include_sources)}...")
         async with FactCheckService() as fact_service:
             search_results = await fact_service.search_related_content(
                 queries=queries,
-                include_sources=["google", "news"],
+                include_sources=include_sources,
                 languages=["vi", "en"],
-                max_results=100
+                max_results=max_results
             )
         
         print(f"✅ Found {len(search_results)} results")

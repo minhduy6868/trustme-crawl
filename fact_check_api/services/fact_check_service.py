@@ -56,7 +56,7 @@ class FactCheckService:
     
     def generate_search_queries(self, article: str, title: str = None) -> List[str]:
         """
-        Sinh ra các query tìm kiếm
+        Sinh ra các query tìm kiếm - Enhanced cho social media
         """
         queries = []
         
@@ -69,19 +69,23 @@ class FactCheckService:
         if keywords:
             queries.append(' '.join(keywords))
         
-        # Query 3: First sentence
+        # Query 3: First sentence (shorter for social)
         sentences = article.split('.')
         if sentences and len(sentences[0]) > 10:
             first_sentence = sentences[0].strip()
-            if len(first_sentence) > 200:
-                first_sentence = first_sentence[:200]
+            if len(first_sentence) > 100:  # Shorter for social media
+                first_sentence = first_sentence[:100]
             queries.append(first_sentence)
         
         # Query 4: Keywords phân tán hơn
         if len(keywords) > 3:
             queries.append(' '.join(keywords[1:4]))
         
-        return queries[:3]  # Limit to 3 queries
+        # Query 5: Top 2-3 keywords only (good for social search)
+        if len(keywords) >= 2:
+            queries.append(' '.join(keywords[:3]))
+        
+        return queries[:4]  # Increased to 4 queries for better coverage
     
     async def search_related_content(
         self,
@@ -143,17 +147,25 @@ class FactCheckService:
             if domain.startswith('www.'):
                 domain = domain[4:]
             
-            # Determine platform
-            if 'facebook.com' in domain:
+            # Determine platform - Enhanced với nhiều platform hơn
+            if 'facebook.com' in domain or 'fb.com' in domain or 'm.facebook.com' in domain:
                 platform = 'facebook'
             elif 'twitter.com' in domain or 'x.com' in domain:
                 platform = 'twitter'
+            elif 'instagram.com' in domain:
+                platform = 'instagram'
+            elif 'linkedin.com' in domain:
+                platform = 'linkedin'
             elif 'youtube.com' in domain or 'youtu.be' in domain:
                 platform = 'youtube'
             elif 'tiktok.com' in domain:
                 platform = 'tiktok'
             elif 'reddit.com' in domain:
                 platform = 'reddit'
+            elif 'telegram.org' in domain or 't.me' in domain:
+                platform = 'telegram'
+            elif 'zalo.me' in domain:
+                platform = 'zalo'
             else:
                 platform = 'web'
         except:
@@ -192,15 +204,48 @@ class FactCheckService:
             # Remove all HTML tags
             text = re.sub(r'<[^>]+>', ' ', text)
             
+            # Remove markdown links [text](url)
+            text = re.sub(r'\[([^\]]*)\]\([^\)]*\)', r'\1', text)
+            
             # Remove URLs
             text = re.sub(r'http[s]?://\S+', '', text)
             
-            # Clean multiple spaces
+            # Remove Wikipedia-specific noise
+            text = re.sub(r'(?i)(skip to|jump to|table of contents|edit links|from wikipedia)', '', text)
+            text = re.sub(r'(?i)(\d+ languages|language links|edit section|citation needed)', '', text)
+            text = re.sub(r'(?i)(main article|see also|external links|references|further reading)', '', text)
+            
+            # Remove common navigation/UI patterns (Vietnamese)
+            text = re.sub(r'(?i)(bước tới nội dung|trình đơn|chuyển sang thanh bên|điều hướng|công cụ)', '', text)
+            text = re.sub(r'(?i)(tìm kiếm|đăng nhập|tạo tài khoản|quyên góp|liên kết)', '', text)
+            text = re.sub(r'(?i)(sửa đổi|sửa mã nguồn|xem lịch sử|thảo luận|in ra)', '', text)
+            
+            # Remove common navigation/UI patterns (English)
+            text = re.sub(r'(?i)(view source|talk page|create account|log in|donate)', '', text)
+            text = re.sub(r'(?i)(what links here|related changes|upload file|permanent link)', '', text)
+            text = re.sub(r'(?i)(page information|cite this page|download qr|printable version)', '', text)
+            text = re.sub(r'(?i)(move to sidebar|hide|show|toggle|actions|general|tools)', '', text)
+            
+            # Remove WHO/organization specific menus
+            text = re.sub(r'(?i)(world health organization|who regional|select language)', '', text)
+            text = re.sub(r'(?i)(health topics|countries|newsroom|emergencies|data|about who)', '', text)
+            
+            # Remove language lists (e.g., "English العربية 中文")
+            text = re.sub(r'(?:English|Français|Español|العربية|中文|Русский|Português|Deutsch|Italiano|日本語|한국어|Tiếng Việt|ไทย|Indonesia|Polski|Türkçe|Українська|עברית|فارسی){2,}[\s\w]*', '', text)
+            
+            # Remove repeated special characters
+            text = re.sub(r'[\[\]\(\)\*\#\-\=\|]{3,}', '', text)
+            
+            # Remove single letters/numbers with asterisks (menu items)
+            text = re.sub(r'\*\s*[A-Z]\s*\*', '', text)
+            
+            # Clean multiple spaces and newlines
             text = re.sub(r'\s+', ' ', text)
+            text = re.sub(r'\n{3,}', '\n\n', text)
             text = text.strip()
             
-            # Only keep if has meaningful content
-            if len(text) > 100:
+            # Only keep if has meaningful content (increased threshold)
+            if len(text) > 200 and not text.count('*') > len(text) / 10:
                 article = text
         
         # Check crawl success
@@ -211,7 +256,7 @@ class FactCheckService:
         
         return {
             'url': result.get('url', ''),
-            'title': result.get('title', 'No title'),
+            'title': result.get('title') or 'No title',  # Ensure not None
             'article': article,  # Clean plain text (có thể None nếu chưa crawl)
             'domain': domain,
             'created_at': created_at,

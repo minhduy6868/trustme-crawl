@@ -47,14 +47,13 @@ class ArticleAnalyzeRequest(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "source_article": {
-                    "url": "https://www.facebook.com/user/posts/123",
-                    "article": "Breaking news về AI...",
-                    "platform": "facebook"
-                },
-                "page": 1,
-                "limit": 10,
-                "deep_crawl": True
+                "url": "https://test.com",
+                "title": "COVID-19 vaccine",
+                "article": "Vaccine COVID-19 thế hệ mới được phê duyệt tại Việt Nam",
+                "created_at": None,
+                "author": None,
+                "platform": "web",
+                "image_urls": []
             }
         }
 

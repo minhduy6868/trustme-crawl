@@ -52,9 +52,10 @@ class EnhancedSearchService:
         
         # Normalize sources
         if "all" in include_sources:
-            include_sources = ["google", "facebook", "twitter", "reddit", "news", "youtube", "tiktok"]
+            include_sources = ["google", "facebook", "twitter", "reddit", "news", "youtube", "tiktok", "instagram", "linkedin"]
         
-        results_per_source = max(10, max_results // len(include_sources))
+        # Allocate more results for social platforms
+        results_per_source = max(15, max_results // len(include_sources))
         
         tasks = []
         
@@ -73,6 +74,14 @@ class EnhancedSearchService:
         # Twitter/X
         if "twitter" in include_sources or "x" in include_sources:
             tasks.append(self._search_twitter(query, results_per_source, languages))
+        
+        # Instagram
+        if "instagram" in include_sources:
+            tasks.append(self._search_instagram(query, results_per_source, languages))
+        
+        # LinkedIn
+        if "linkedin" in include_sources:
+            tasks.append(self._search_linkedin(query, results_per_source))
         
         # Reddit
         if "reddit" in include_sources:
@@ -158,11 +167,11 @@ class EnhancedSearchService:
         max_results: int = 20,
         languages: List[str] = ["vi"]
     ) -> List[Dict[str, Any]]:
-        """Tìm kiếm Facebook (via Google site search)"""
+        """Tìm kiếm Facebook - Tăng cường với nhiều chiến lược"""
         results = []
         
         try:
-            # Search Facebook via Google site operator
+            # Strategy 1: Direct Facebook search via DuckDuckGo
             site_query = f"{query} site:facebook.com"
             encoded_query = quote_plus(site_query)
             url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
@@ -178,6 +187,26 @@ class EnhancedSearchService:
             
             await asyncio.sleep(self.rate_limit_delay)
             
+            # Strategy 2: Search Facebook pages và posts riêng
+            if len(results) < max_results:
+                page_query = f"{query} site:facebook.com/*/posts OR site:m.facebook.com"
+                encoded_query = quote_plus(page_query)
+                url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+                
+                async with self.session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        html = await response.text()
+                        more_results = self._parse_duckduckgo_html(html, source="facebook")
+                        
+                        # Deduplicate
+                        existing_urls = {r['url'] for r in results}
+                        for r in more_results:
+                            if r['url'] not in existing_urls:
+                                results.append(r)
+                                existing_urls.add(r['url'])
+                
+                await asyncio.sleep(self.rate_limit_delay)
+            
         except Exception as e:
             print(f"Facebook search error: {e}")
         
@@ -189,12 +218,12 @@ class EnhancedSearchService:
         max_results: int = 20,
         languages: List[str] = ["vi"]
     ) -> List[Dict[str, Any]]:
-        """Tìm kiếm Twitter/X"""
+        """Tìm kiếm Twitter/X - Tăng cường nhiều chiến lược"""
         results = []
         
         try:
-            # Search Twitter via site operator
-            site_query = f"{query} site:twitter.com OR site:x.com"
+            # Strategy 1: Search both twitter.com và x.com
+            site_query = f"{query} (site:twitter.com OR site:x.com)"
             encoded_query = quote_plus(site_query)
             url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
             
@@ -208,6 +237,26 @@ class EnhancedSearchService:
                     results = self._parse_duckduckgo_html(html, source="twitter")
             
             await asyncio.sleep(self.rate_limit_delay)
+            
+            # Strategy 2: Search với hashtags nếu có
+            if '#' not in query and len(results) < max_results:
+                hashtag_query = f"#{query.replace(' ', '')} site:twitter.com OR site:x.com"
+                encoded_query = quote_plus(hashtag_query)
+                url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+                
+                async with self.session.get(url, headers=headers) as response:
+                    if response.status == 200:
+                        html = await response.text()
+                        more_results = self._parse_duckduckgo_html(html, source="twitter")
+                        
+                        # Deduplicate
+                        existing_urls = {r['url'] for r in results}
+                        for r in more_results:
+                            if r['url'] not in existing_urls:
+                                results.append(r)
+                                existing_urls.add(r['url'])
+                
+                await asyncio.sleep(self.rate_limit_delay)
             
         except Exception as e:
             print(f"Twitter search error: {e}")
@@ -299,6 +348,67 @@ class EnhancedSearchService:
             
         except Exception as e:
             print(f"TikTok search error: {e}")
+        
+        return results[:max_results]
+    
+    async def _search_instagram(
+        self,
+        query: str,
+        max_results: int = 20,
+        languages: List[str] = ["vi"]
+    ) -> List[Dict[str, Any]]:
+        """Tìm kiếm Instagram"""
+        results = []
+        
+        try:
+            # Search Instagram posts
+            site_query = f"{query} site:instagram.com"
+            encoded_query = quote_plus(site_query)
+            url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            async with self.session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    html = await response.text()
+                    results = self._parse_duckduckgo_html(html, source="instagram")
+            
+            await asyncio.sleep(self.rate_limit_delay)
+            
+        except Exception as e:
+            print(f"Instagram search error: {e}")
+        
+        return results[:max_results]
+    
+    async def _search_linkedin(
+        self,
+        query: str,
+        max_results: int = 20
+    ) -> List[Dict[str, Any]]:
+        """Tìm kiếm LinkedIn"""
+        results = []
+        
+        try:
+            # Search LinkedIn posts and articles
+            site_query = f"{query} site:linkedin.com"
+            encoded_query = quote_plus(site_query)
+            url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            async with self.session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    html = await response.text()
+                    results = self._parse_duckduckgo_html(html, source="linkedin")
+            
+            await asyncio.sleep(self.rate_limit_delay)
+            
+        except Exception as e:
+            print(f"LinkedIn search error: {e}")
         
         return results[:max_results]
     
