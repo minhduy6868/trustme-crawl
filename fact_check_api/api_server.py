@@ -14,6 +14,7 @@ if parent_dir not in sys.path:
 import asyncio
 import time
 from typing import Optional
+from collections import Counter
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -151,6 +152,17 @@ async def analyze_article(request: ArticleAnalyzeRequest):
                 for result in crawled_results
             ]
         
+        # Deduplicate by fingerprint
+        fingerprint_map = {}
+        for article in articles:
+            fp = article.get("fingerprint")
+            if fp and fp in fingerprint_map:
+                article["duplicate_of"] = fingerprint_map[fp]
+            elif fp:
+                fingerprint_map[fp] = article.get("url")
+        
+        domain_counts = Counter(a.get("domain") for a in articles if a.get("domain"))
+        
         # Step 5: Create response (NO pagination - return all)
         related_articles = [
             RelatedArticle(**article)
@@ -164,7 +176,8 @@ async def analyze_article(request: ArticleAnalyzeRequest):
                 page=1,
                 limit=10,
                 total=len(related_articles),
-                has_next=False
+                has_next=False,
+                domain_frequency=dict(domain_counts)
             )
         )
         

@@ -3,7 +3,7 @@ Fact Check API Schemas
 Tìm kiếm và crawl thông tin liên quan từ một bài đăng
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -71,6 +71,13 @@ class RelatedArticle(BaseModel):
     platform: str = Field(..., description="Nền tảng")
     crawl_success: bool = Field(default=False, description="Có crawl thành công không")
     image_urls: List[str] = Field(default_factory=list, description="Danh sách ảnh")
+    first_seen: Optional[str] = Field(None, description="Lần đầu phát hiện")
+    last_seen: Optional[str] = Field(None, description="Lần cuối phát hiện")
+    share_count: int = Field(default=0, description="Số lượt chia sẻ/bài liên quan")
+    is_verified_account: bool = Field(default=False, description="Tài khoản đã xác minh")
+    screenshot_hash: Optional[str] = Field(None, description="Hash ảnh chụp màn hình")
+    fingerprint: Optional[str] = Field(None, description="Fingerprint nội dung")
+    duplicate_of: Optional[str] = Field(None, description="Nếu là trùng lặp, URL gốc")
 
 
 class PaginationMeta(BaseModel):
@@ -79,6 +86,7 @@ class PaginationMeta(BaseModel):
     limit: int = Field(default=10, description="Số item mỗi trang")
     total: int = Field(..., description="Tổng số item trả về")
     has_next: bool = Field(default=False, description="Có trang tiếp theo không")
+    domain_frequency: Dict[str, int] = Field(default_factory=dict, description="Số lượng kết quả theo domain")
 
 
 class ArticleAnalyzeResponse(BaseModel):
@@ -102,7 +110,8 @@ class ArticleAnalyzeResponse(BaseModel):
                     "limit": 10,
                     "total": 10,
                     "has_next": False,
-                    "total_found": 50
+                    "total_found": 50,
+                    "domain_frequency": {}
                 }
             }
         }

@@ -3,6 +3,7 @@ Fact Check Service
 Service tìm kiếm thông tin liên quan
 """
 
+import hashlib
 import re
 from typing import List, Dict, Any, Tuple
 from datetime import datetime
@@ -135,7 +136,7 @@ class FactCheckService:
     def convert_to_article_format(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """
         Chuyển đổi search result sang format article chuẩn
-        Trả về: {url, title, article, domain, created_at, author, platform, crawl_success, image_urls}
+        Trả về: {url, title, article, domain, created_at, author, platform, crawl_success, image_urls, fingerprint}
         """
         # Extract domain for platform
         from urllib.parse import urlparse
@@ -253,6 +254,13 @@ class FactCheckService:
         
         # Extract image URLs (giả định trong tương lai)
         image_urls = []
+        screenshot_hash = result.get('screenshot_hash')
+        content_for_hash = article or result.get('snippet') or result.get('title') or ''
+        fingerprint = hashlib.md5(content_for_hash.encode('utf-8')).hexdigest() if content_for_hash else None
+        first_seen = result.get('first_seen') or created_at
+        last_seen = result.get('last_seen') or result.get('published_time') or created_at
+        share_count = result.get('share_count', 0)
+        is_verified_account = bool(result.get('url_trust') or result.get('is_verified_account'))
         
         return {
             'url': result.get('url', ''),
@@ -263,5 +271,11 @@ class FactCheckService:
             'author': result.get('author'),
             'platform': platform,
             'crawl_success': crawl_success,
-            'image_urls': image_urls
+            'image_urls': image_urls,
+            'first_seen': first_seen,
+            'last_seen': last_seen,
+            'share_count': share_count,
+            'is_verified_account': is_verified_account,
+            'screenshot_hash': screenshot_hash,
+            'fingerprint': fingerprint
         }
