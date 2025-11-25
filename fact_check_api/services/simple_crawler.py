@@ -41,12 +41,14 @@ class SimpleContentCrawler:
         Returns:
             List of dicts với full content added
         """
-        tasks = [
-            self._crawl_single(result)
-            for result in search_results
-        ]
-        
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Use a single browser instance for all crawls
+        async with AsyncWebCrawler(config=self.browser_config) as crawler:
+            tasks = [
+                self._crawl_single(crawler, result)
+                for result in search_results
+            ]
+            
+            results = await asyncio.gather(*tasks, return_exceptions=True)
         
         # Filter valid results
         valid_results = []
@@ -56,7 +58,7 @@ class SimpleContentCrawler:
         
         return valid_results
     
-    async def _crawl_single(self, search_result: Dict[str, Any]) -> Dict[str, Any]:
+    async def _crawl_single(self, crawler: AsyncWebCrawler, search_result: Dict[str, Any]) -> Dict[str, Any]:
         """Crawl một URL"""
         
         async with self.semaphore:
@@ -66,46 +68,46 @@ class SimpleContentCrawler:
                 return search_result
             
             try:
-                async with AsyncWebCrawler(config=self.browser_config) as crawler:
-                    result = await crawler.arun(url=url, config=self.crawler_config)
-                    
-                    if not result.success:
-                        # Return original with error
-                        search_result['crawl_success'] = False
-                        search_result['crawl_error'] = result.error_message
-                        search_result['content'] = None
-                        return search_result
-                    
-                    # Extract content
-                    title = result.metadata.get('title', search_result.get('title', ''))
-                    content = result.markdown.raw_markdown
-                    
-                    # Detect language
-                    language = self._detect_language(content)
-                    
-                    # Count words
-                    word_count = len(content.split())
-                    
-                    # Try to extract author from metadata
-                    author = result.metadata.get('author') or self._extract_author(content)
-                    
-                    # Try to extract publish time
-                    published_time = self._extract_publish_time(result.metadata)
-                    
-                    # Update search result with crawled data
-                    search_result.update({
-                        'title': title,
-                        'content': content[:50000],  # Limit to 50k chars
-                        'author': author,
-                        'published_time': published_time,
-                        'language': language,
-                        'word_count': word_count,
-                        'crawled_at': datetime.utcnow().isoformat(),
-                        'crawl_success': True,
-                        'crawl_error': None,
-                    })
-                    
+                # Use the shared crawler instance
+                result = await crawler.arun(url=url, config=self.crawler_config)
+                
+                if not result.success:
+                    # Return original with error
+                    search_result['crawl_success'] = False
+                    search_result['crawl_error'] = result.error_message
+                    search_result['content'] = None
                     return search_result
+                
+                # Extract content
+                title = result.metadata.get('title', search_result.get('title', ''))
+                content = result.markdown.raw_markdown
+                
+                # Detect language
+                language = self._detect_language(content)
+                
+                # Count words
+                word_count = len(content.split())
+                
+                # Try to extract author from metadata
+                author = result.metadata.get('author') or self._extract_author(content)
+                
+                # Try to extract publish time
+                published_time = self._extract_publish_time(result.metadata)
+                
+                # Update search result with crawled data
+                search_result.update({
+                    'title': title,
+                    'content': content[:50000],  # Limit to 50k chars
+                    'author': author,
+                    'published_time': published_time,
+                    'language': language,
+                    'word_count': word_count,
+                    'crawled_at': datetime.utcnow().isoformat(),
+                    'crawl_success': True,
+                    'crawl_error': None,
+                })
+                
+                return search_result
             
             except asyncio.TimeoutError:
                 search_result['crawl_success'] = False

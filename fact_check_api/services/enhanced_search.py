@@ -5,6 +5,7 @@ Tìm kiếm từ nhiều nguồn: Google, Facebook, Twitter/X, Reddit, News, You
 
 import asyncio
 import re
+import random
 from typing import List, Dict, Any, Optional
 from urllib.parse import quote_plus, urlparse
 import aiohttp
@@ -14,9 +15,20 @@ from datetime import datetime
 class EnhancedSearchService:
     """Service tìm kiếm đa nguồn mạnh mẽ"""
     
+    USER_AGENTS = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/115.0',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 OPR/106.0.0.0',
+    ]
+
     def __init__(self):
         self.session: Optional[aiohttp.ClientSession] = None
-        self.rate_limit_delay = 0.5  # Delay giữa các requests
+        self.rate_limit_delay = 2.0  # Tăng delay lên 2s để tránh bị chặn
         self.timeout = aiohttp.ClientTimeout(total=30)
         self.max_retries = 2
     
@@ -27,6 +39,20 @@ class EnhancedSearchService:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self.session:
             await self.session.close()
+            
+    def _get_random_headers(self) -> Dict[str, str]:
+        """Get headers with random User-Agent"""
+        return {
+            'User-Agent': random.choice(self.USER_AGENTS),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
+            'Referer': 'https://duckduckgo.com/',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+        }
     
     async def search_all(
         self,
@@ -56,42 +82,54 @@ class EnhancedSearchService:
         
         results_per_source = max(10, max_results // len(include_sources))
         
-        tasks = []
+        # Define tasks
+        search_functions = []
         
         # Google search (general)
         if "google" in include_sources:
-            tasks.append(self._search_google(query, results_per_source, languages))
+            search_functions.append(lambda: self._search_google(query, results_per_source, languages))
         
         # Google News
         if "news" in include_sources:
-            tasks.append(self._search_google_news(query, results_per_source, languages))
+            search_functions.append(lambda: self._search_google_news(query, results_per_source, languages))
         
         # Facebook
         if "facebook" in include_sources:
-            tasks.append(self._search_facebook(query, results_per_source, languages))
+            search_functions.append(lambda: self._search_facebook(query, results_per_source, languages))
         
         # Twitter/X
         if "twitter" in include_sources or "x" in include_sources:
-            tasks.append(self._search_twitter(query, results_per_source, languages))
+            search_functions.append(lambda: self._search_twitter(query, results_per_source, languages))
         
         # Reddit
         if "reddit" in include_sources:
-            tasks.append(self._search_reddit(query, results_per_source))
+            search_functions.append(lambda: self._search_reddit(query, results_per_source))
         
         # YouTube
         if "youtube" in include_sources:
-            tasks.append(self._search_youtube(query, results_per_source, languages))
+            search_functions.append(lambda: self._search_youtube(query, results_per_source, languages))
         
         # TikTok
         if "tiktok" in include_sources:
-            tasks.append(self._search_tiktok(query, results_per_source))
+            search_functions.append(lambda: self._search_tiktok(query, results_per_source))
         
         # Government sites (.gov, .gov.vn)
         if "government" in include_sources or "gov" in include_sources:
-            tasks.append(self._search_government_sites(query, languages))
+            search_functions.append(lambda: self._search_government_sites(query, languages))
         
-        # Execute all searches in parallel
-        results_batches = await asyncio.gather(*tasks, return_exceptions=True)
+        # Execute searches sequentially with delay to avoid blocking
+        results_batches = []
+        for i, func in enumerate(search_functions):
+            try:
+                # Add delay between requests (except the first one)
+                if i > 0:
+                    await asyncio.sleep(self.rate_limit_delay + random.uniform(0.5, 1.5))
+                
+                result = await func()
+                results_batches.append(result)
+            except Exception as e:
+                print(f"Error in search task {i}: {e}")
+                results_batches.append([])
         
         # Combine and deduplicate
         all_results = []
@@ -120,16 +158,17 @@ class EnhancedSearchService:
             encoded_query = quote_plus(query)
             url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
+            headers = self._get_random_headers()
             
             async with self.session.get(url, headers=headers) as response:
                 if response.status == 200:
                     html = await response.text()
                     results = self._parse_duckduckgo_html(html, source="google")
-            
-            await asyncio.sleep(self.rate_limit_delay)
+                elif response.status == 403 or response.status == 429:
+                    print(f"Google/DuckDuckGo blocked request (Status {response.status}). Waiting longer...")
+                    await asyncio.sleep(5)
+                else:
+                    print(f"Google search failed with status: {response.status}")
             
         except Exception as e:
             print(f"Google search error: {e}")
@@ -167,16 +206,14 @@ class EnhancedSearchService:
             encoded_query = quote_plus(site_query)
             url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
+            headers = self._get_random_headers()
             
             async with self.session.get(url, headers=headers) as response:
                 if response.status == 200:
                     html = await response.text()
                     results = self._parse_duckduckgo_html(html, source="facebook")
-            
-            await asyncio.sleep(self.rate_limit_delay)
+                else:
+                    print(f"Facebook search failed with status: {response.status}")
             
         except Exception as e:
             print(f"Facebook search error: {e}")
@@ -198,16 +235,14 @@ class EnhancedSearchService:
             encoded_query = quote_plus(site_query)
             url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
+            headers = self._get_random_headers()
             
             async with self.session.get(url, headers=headers) as response:
                 if response.status == 200:
                     html = await response.text()
                     results = self._parse_duckduckgo_html(html, source="twitter")
-            
-            await asyncio.sleep(self.rate_limit_delay)
+                else:
+                    print(f"Twitter search failed with status: {response.status}")
             
         except Exception as e:
             print(f"Twitter search error: {e}")
@@ -227,16 +262,14 @@ class EnhancedSearchService:
             encoded_query = quote_plus(site_query)
             url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
+            headers = self._get_random_headers()
             
             async with self.session.get(url, headers=headers) as response:
                 if response.status == 200:
                     html = await response.text()
                     results = self._parse_duckduckgo_html(html, source="reddit")
-            
-            await asyncio.sleep(self.rate_limit_delay)
+                else:
+                    print(f"Reddit search failed with status: {response.status}")
             
         except Exception as e:
             print(f"Reddit search error: {e}")
@@ -257,16 +290,14 @@ class EnhancedSearchService:
             encoded_query = quote_plus(site_query)
             url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
+            headers = self._get_random_headers()
             
             async with self.session.get(url, headers=headers) as response:
                 if response.status == 200:
                     html = await response.text()
                     results = self._parse_duckduckgo_html(html, source="youtube")
-            
-            await asyncio.sleep(self.rate_limit_delay)
+                else:
+                    print(f"YouTube search failed with status: {response.status}")
             
         except Exception as e:
             print(f"YouTube search error: {e}")
@@ -286,16 +317,14 @@ class EnhancedSearchService:
             encoded_query = quote_plus(site_query)
             url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
+            headers = self._get_random_headers()
             
             async with self.session.get(url, headers=headers) as response:
                 if response.status == 200:
                     html = await response.text()
                     results = self._parse_duckduckgo_html(html, source="tiktok")
-            
-            await asyncio.sleep(self.rate_limit_delay)
+                else:
+                    print(f"TikTok search failed with status: {response.status}")
             
         except Exception as e:
             print(f"TikTok search error: {e}")
@@ -322,17 +351,17 @@ class EnhancedSearchService:
                 encoded_query = quote_plus(site_query)
                 url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
                 
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
+                headers = self._get_random_headers()
                 
                 async with self.session.get(url, headers=headers) as response:
                     if response.status == 200:
                         html = await response.text()
                         domain_results = self._parse_duckduckgo_html(html, source="government")
                         results.extend(domain_results)
+                    else:
+                        print(f"Gov search failed for {domain} with status: {response.status}")
                 
-                await asyncio.sleep(self.rate_limit_delay)
+                await asyncio.sleep(self.rate_limit_delay + random.uniform(0.5, 1.0))
                 
             except Exception as e:
                 print(f"Government site search error for {domain}: {e}")
