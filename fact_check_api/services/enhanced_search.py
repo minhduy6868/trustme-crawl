@@ -5,28 +5,25 @@ Tìm kiếm từ nhiều nguồn: Google, Facebook, Twitter/X, Reddit, News, You
 
 import asyncio
 import re
+import random
 from typing import List, Dict, Any, Optional
 from urllib.parse import quote_plus, urlparse
-import aiohttp
-from datetime import datetime
+from datetime import datetime, timezone
+from ddgs import DDGS
 
 
 class EnhancedSearchService:
     """Service tìm kiếm đa nguồn mạnh mẽ"""
     
     def __init__(self):
-        self.session: Optional[aiohttp.ClientSession] = None
-        self.rate_limit_delay = 0.5  # Delay giữa các requests
-        self.timeout = aiohttp.ClientTimeout(total=30)
-        self.max_retries = 2
+        self.max_retries = 3
+        self.semaphore = asyncio.Semaphore(5) # Higher concurrency allowed with library
     
     async def __aenter__(self):
-        self.session = aiohttp.ClientSession(timeout=self.timeout)
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self.session:
-            await self.session.close()
+        pass
     
     async def search_all(
         self,
@@ -116,6 +113,30 @@ class EnhancedSearchService:
         
         return all_results[:max_results]
     
+    async def _search_ddg_wrapper(self, query: str, max_results: int, region: str = "wt-wt") -> List[Dict[str, Any]]:
+        """Wrapper for DDGS text search running in thread"""
+        def run_search():
+            results = []
+            try:
+                with DDGS() as ddgs:
+                    # Use 'lite' backend for speed and reliability if needed, or 'auto'
+                    ddg_results = ddgs.text(query, region=region, max_results=max_results, backend="auto")
+                    if ddg_results:
+                        for r in ddg_results:
+                            results.append({
+                                'url': r.get('href', ''),
+                                'title': r.get('title', ''),
+                                'snippet': r.get('body', ''),
+                                'source': 'duckduckgo',
+                                'found_at': datetime.now(timezone.utc).isoformat(),
+                                'domain': self._extract_domain(r.get('href', ''))
+                            })
+            except Exception as e:
+                print(f"DDGS error for '{query}': {e}")
+            return results
+
+        return await asyncio.to_thread(run_search)
+
     async def _search_google(
         self, 
         query: str, 
@@ -123,27 +144,14 @@ class EnhancedSearchService:
         languages: List[str] = ["vi"]
     ) -> List[Dict[str, Any]]:
         """Tìm kiếm Google (via DuckDuckGo)"""
-        results = []
+        region = "vn-vi" if "vi" in languages else "wt-wt"
+        results = await self._search_ddg_wrapper(query, max_results, region)
         
-        try:
-            encoded_query = quote_plus(query)
-            url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+        # Update source
+        for r in results:
+            r['source'] = 'google'
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            async with self.session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    html = await response.text()
-                    results = self._parse_duckduckgo_html(html, source="google")
-            
-            await asyncio.sleep(self.rate_limit_delay)
-            
-        except Exception as e:
-            print(f"Google search error: {e}")
-        
-        return results[:max_results]
+        return results
     
     async def _search_google_news(
         self,
@@ -167,50 +175,15 @@ class EnhancedSearchService:
         max_results: int = 20,
         languages: List[str] = ["vi"]
     ) -> List[Dict[str, Any]]:
-        """Tìm kiếm Facebook - Tăng cường với nhiều chiến lược"""
-        results = []
+        """Tìm kiếm Facebook"""
+        site_query = f"{query} site:facebook.com"
+        results = await self._search_ddg_wrapper(site_query, max_results)
         
-        try:
-            # Strategy 1: Direct Facebook search via DuckDuckGo
-            site_query = f"{query} site:facebook.com"
-            encoded_query = quote_plus(site_query)
-            url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+        # Update source
+        for r in results:
+            r['source'] = 'facebook'
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            async with self.session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    html = await response.text()
-                    results = self._parse_duckduckgo_html(html, source="facebook")
-            
-            await asyncio.sleep(self.rate_limit_delay)
-            
-            # Strategy 2: Search Facebook pages và posts riêng
-            if len(results) < max_results:
-                page_query = f"{query} site:facebook.com/*/posts OR site:m.facebook.com"
-                encoded_query = quote_plus(page_query)
-                url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
-                
-                async with self.session.get(url, headers=headers) as response:
-                    if response.status == 200:
-                        html = await response.text()
-                        more_results = self._parse_duckduckgo_html(html, source="facebook")
-                        
-                        # Deduplicate
-                        existing_urls = {r['url'] for r in results}
-                        for r in more_results:
-                            if r['url'] not in existing_urls:
-                                results.append(r)
-                                existing_urls.add(r['url'])
-                
-                await asyncio.sleep(self.rate_limit_delay)
-            
-        except Exception as e:
-            print(f"Facebook search error: {e}")
-        
-        return results[:max_results]
+        return results
     
     async def _search_twitter(
         self,
@@ -218,50 +191,15 @@ class EnhancedSearchService:
         max_results: int = 20,
         languages: List[str] = ["vi"]
     ) -> List[Dict[str, Any]]:
-        """Tìm kiếm Twitter/X - Tăng cường nhiều chiến lược"""
-        results = []
+        """Tìm kiếm Twitter/X"""
+        site_query = f"{query} (site:twitter.com OR site:x.com)"
+        results = await self._search_ddg_wrapper(site_query, max_results)
         
-        try:
-            # Strategy 1: Search both twitter.com và x.com
-            site_query = f"{query} (site:twitter.com OR site:x.com)"
-            encoded_query = quote_plus(site_query)
-            url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+        # Update source
+        for r in results:
+            r['source'] = 'twitter'
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            async with self.session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    html = await response.text()
-                    results = self._parse_duckduckgo_html(html, source="twitter")
-            
-            await asyncio.sleep(self.rate_limit_delay)
-            
-            # Strategy 2: Search với hashtags nếu có
-            if '#' not in query and len(results) < max_results:
-                hashtag_query = f"#{query.replace(' ', '')} site:twitter.com OR site:x.com"
-                encoded_query = quote_plus(hashtag_query)
-                url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
-                
-                async with self.session.get(url, headers=headers) as response:
-                    if response.status == 200:
-                        html = await response.text()
-                        more_results = self._parse_duckduckgo_html(html, source="twitter")
-                        
-                        # Deduplicate
-                        existing_urls = {r['url'] for r in results}
-                        for r in more_results:
-                            if r['url'] not in existing_urls:
-                                results.append(r)
-                                existing_urls.add(r['url'])
-                
-                await asyncio.sleep(self.rate_limit_delay)
-            
-        except Exception as e:
-            print(f"Twitter search error: {e}")
-        
-        return results[:max_results]
+        return results
     
     async def _search_reddit(
         self,
@@ -269,28 +207,14 @@ class EnhancedSearchService:
         max_results: int = 20
     ) -> List[Dict[str, Any]]:
         """Tìm kiếm Reddit"""
-        results = []
+        site_query = f"{query} site:reddit.com"
+        results = await self._search_ddg_wrapper(site_query, max_results)
         
-        try:
-            site_query = f"{query} site:reddit.com"
-            encoded_query = quote_plus(site_query)
-            url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+        # Update source
+        for r in results:
+            r['source'] = 'reddit'
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            async with self.session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    html = await response.text()
-                    results = self._parse_duckduckgo_html(html, source="reddit")
-            
-            await asyncio.sleep(self.rate_limit_delay)
-            
-        except Exception as e:
-            print(f"Reddit search error: {e}")
-        
-        return results[:max_results]
+        return results
     
     async def _search_youtube(
         self,
@@ -299,28 +223,14 @@ class EnhancedSearchService:
         languages: List[str] = ["vi"]
     ) -> List[Dict[str, Any]]:
         """Tìm kiếm YouTube"""
-        results = []
+        site_query = f"{query} site:youtube.com"
+        results = await self._search_ddg_wrapper(site_query, max_results)
         
-        try:
-            site_query = f"{query} site:youtube.com"
-            encoded_query = quote_plus(site_query)
-            url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+        # Update source
+        for r in results:
+            r['source'] = 'youtube'
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            async with self.session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    html = await response.text()
-                    results = self._parse_duckduckgo_html(html, source="youtube")
-            
-            await asyncio.sleep(self.rate_limit_delay)
-            
-        except Exception as e:
-            print(f"YouTube search error: {e}")
-        
-        return results[:max_results]
+        return results
     
     async def _search_tiktok(
         self,
@@ -328,28 +238,14 @@ class EnhancedSearchService:
         max_results: int = 20
     ) -> List[Dict[str, Any]]:
         """Tìm kiếm TikTok"""
-        results = []
+        site_query = f"{query} site:tiktok.com"
+        results = await self._search_ddg_wrapper(site_query, max_results)
         
-        try:
-            site_query = f"{query} site:tiktok.com"
-            encoded_query = quote_plus(site_query)
-            url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+        # Update source
+        for r in results:
+            r['source'] = 'tiktok'
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            async with self.session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    html = await response.text()
-                    results = self._parse_duckduckgo_html(html, source="tiktok")
-            
-            await asyncio.sleep(self.rate_limit_delay)
-            
-        except Exception as e:
-            print(f"TikTok search error: {e}")
-        
-        return results[:max_results]
+        return results
     
     async def _search_instagram(
         self,
@@ -358,29 +254,14 @@ class EnhancedSearchService:
         languages: List[str] = ["vi"]
     ) -> List[Dict[str, Any]]:
         """Tìm kiếm Instagram"""
-        results = []
+        site_query = f"{query} site:instagram.com"
+        results = await self._search_ddg_wrapper(site_query, max_results)
         
-        try:
-            # Search Instagram posts
-            site_query = f"{query} site:instagram.com"
-            encoded_query = quote_plus(site_query)
-            url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+        # Update source
+        for r in results:
+            r['source'] = 'instagram'
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            async with self.session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    html = await response.text()
-                    results = self._parse_duckduckgo_html(html, source="instagram")
-            
-            await asyncio.sleep(self.rate_limit_delay)
-            
-        except Exception as e:
-            print(f"Instagram search error: {e}")
-        
-        return results[:max_results]
+        return results
     
     async def _search_linkedin(
         self,
@@ -388,29 +269,14 @@ class EnhancedSearchService:
         max_results: int = 20
     ) -> List[Dict[str, Any]]:
         """Tìm kiếm LinkedIn"""
-        results = []
+        site_query = f"{query} site:linkedin.com"
+        results = await self._search_ddg_wrapper(site_query, max_results)
         
-        try:
-            # Search LinkedIn posts and articles
-            site_query = f"{query} site:linkedin.com"
-            encoded_query = quote_plus(site_query)
-            url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+        # Update source
+        for r in results:
+            r['source'] = 'linkedin'
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            
-            async with self.session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    html = await response.text()
-                    results = self._parse_duckduckgo_html(html, source="linkedin")
-            
-            await asyncio.sleep(self.rate_limit_delay)
-            
-        except Exception as e:
-            print(f"LinkedIn search error: {e}")
-        
-        return results[:max_results]
+        return results
     
     async def _search_government_sites(
         self,
@@ -426,67 +292,18 @@ class EnhancedSearchService:
             "baochinhphu.vn",
         ]
         
-        for domain in gov_domains[:2]:  # Limit để tránh quá nhiều requests
-            try:
-                site_query = f"{query} site:{domain}"
-                encoded_query = quote_plus(site_query)
-                url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+        for domain in gov_domains[:2]:
+            site_query = f"{query} site:{domain}"
+            domain_results = await self._search_ddg_wrapper(site_query, 10, region="vn-vi")
+            
+            for r in domain_results:
+                r['source'] = 'government'
                 
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-                
-                async with self.session.get(url, headers=headers) as response:
-                    if response.status == 200:
-                        html = await response.text()
-                        domain_results = self._parse_duckduckgo_html(html, source="government")
-                        results.extend(domain_results)
-                
-                await asyncio.sleep(self.rate_limit_delay)
-                
-            except Exception as e:
-                print(f"Government site search error for {domain}: {e}")
+            results.extend(domain_results)
         
         return results
     
-    def _parse_duckduckgo_html(self, html: str, source: str = "google") -> List[Dict[str, Any]]:
-        """Parse DuckDuckGo HTML results"""
-        results = []
-        
-        # Extract links and titles
-        link_pattern = r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([^<]+)</a>'
-        snippet_pattern = r'<a[^>]+class="result__snippet"[^>]*>([^<]+)</a>'
-        
-        links = re.findall(link_pattern, html)
-        snippets = re.findall(snippet_pattern, html)
-        
-        for i, (url, title) in enumerate(links[:50]):
-            # Clean URL (remove DuckDuckGo redirect)
-            if '//duckduckgo.com/l/?' in url:
-                match = re.search(r'uddg=([^&]+)', url)
-                if match:
-                    from urllib.parse import unquote
-                    url = unquote(match.group(1))
-            
-            # Skip if URL is invalid
-            if not url or not url.startswith('http'):
-                continue
-            
-            snippet = snippets[i] if i < len(snippets) else ""
-            
-            # Extract domain
-            domain = self._extract_domain(url)
-            
-            results.append({
-                'url': url,
-                'title': title.strip(),
-                'snippet': snippet.strip(),
-                'source': source,
-                'domain': domain,
-                'found_at': datetime.utcnow().isoformat(),
-            })
-        
-        return results
+
     
     def _extract_domain(self, url: str) -> str:
         """Extract domain from URL"""
