@@ -15,6 +15,7 @@ import asyncio
 import time
 from typing import Optional
 from collections import Counter
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +32,18 @@ from services.fact_check_service import FactCheckService
 from services.simple_crawler import SimpleContentCrawler
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize services"""
+    global crawler_service
+    crawler_service = SimpleContentCrawler(max_concurrent=10)
+    print("✅ Fact Check API initialized")
+    yield
+    # Clean up resources if needed
+    if crawler_service:
+        # Add cleanup logic if SimpleContentCrawler has close method
+        pass
+
 # Initialize FastAPI
 app = FastAPI(
     title="Fact Check API",
@@ -38,6 +51,7 @@ app = FastAPI(
     version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # CORS
@@ -51,14 +65,6 @@ app.add_middleware(
 
 # Services
 crawler_service: Optional[SimpleContentCrawler] = None
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services"""
-    global crawler_service
-    crawler_service = SimpleContentCrawler(max_concurrent=10)
-    print("✅ Fact Check API initialized")
 
 
 @app.get("/")
@@ -79,10 +85,10 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check"""
-    from datetime import datetime
+    from datetime import datetime, timezone
     return {
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "services": {
             "crawler": crawler_service is not None,
         }
@@ -196,7 +202,7 @@ async def analyze_article(request: ArticleAnalyzeRequest):
 
 if __name__ == "__main__":
     import os
-    port = int(os.getenv("API_PORT", 8001))
+    port = int(os.getenv("API_PORT", 8000))
     uvicorn.run(
         app,  # Use app object directly
         host="0.0.0.0",

@@ -5,7 +5,7 @@ Crawl full content từ URLs tìm được
 
 import asyncio
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 import re
 
@@ -22,7 +22,12 @@ class SimpleContentCrawler:
         self.browser_config = BrowserConfig(
             headless=True,
             verbose=False,
-            extra_args=["--disable-gpu", "--disable-dev-shm-usage", "--no-sandbox"],
+            extra_args=[
+                "--disable-gpu", 
+                "--disable-dev-shm-usage", 
+                "--no-sandbox",
+                "--disable-blink-features=AutomationControlled"
+            ],
         )
         
         self.crawler_config = CrawlerRunConfig(
@@ -62,7 +67,10 @@ class SimpleContentCrawler:
         async with self.semaphore:
             url = search_result.get('url', '')
             
-            if not url:
+            if not url or not url.startswith(('http://', 'https://')):
+                search_result['crawl_success'] = False
+                search_result['crawl_error'] = "Invalid URL"
+                search_result['content'] = None
                 return search_result
             
             # Detect platform from URL
@@ -111,7 +119,7 @@ class SimpleContentCrawler:
                     'published_time': published_time,
                     'language': language,
                     'word_count': word_count,
-                    'crawled_at': datetime.utcnow().isoformat(),
+                    'crawled_at': datetime.now(timezone.utc).isoformat(),
                     'crawl_success': True,
                     'crawl_error': None,
                 })
@@ -153,7 +161,7 @@ class SimpleContentCrawler:
             social_crawler_config = CrawlerRunConfig(
                 cache_mode=CacheMode.BYPASS,
                 word_count_threshold=10,  # Lower threshold cho social
-                page_timeout=20000,  # Longer timeout cho social
+                page_timeout=30000,  # Longer timeout cho social
                 wait_for="networkidle",  # Wait for network idle
                 delay_before_return_html=3.0,  # Extra delay để load dynamic content
             )
@@ -194,7 +202,7 @@ class SimpleContentCrawler:
                     'published_time': published_time,
                     'language': language,
                     'word_count': word_count,
-                    'crawled_at': datetime.utcnow().isoformat(),
+                    'crawled_at': datetime.now(timezone.utc).isoformat(),
                     'crawl_success': True,
                     'crawl_error': None,
                 })
