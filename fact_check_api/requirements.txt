@@ -16,3 +16,5 @@ python-dateutil>=2.8.0
 
 # Note: crawl4ai is used from parent project (../crawl4ai)
 # The start_fact_check.py script automatically adds it to Python path
+
+ddgs
